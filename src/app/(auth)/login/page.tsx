@@ -25,7 +25,15 @@ export default function LoginPage() {
       if (result.error) {
         toast.error(result.error);
       } else if (result.success) {
-        router.push('/client');
+        // Route to the correct dashboard based on user role
+        const roleDashboardMap: Record<string, string> = {
+          CLIENT: '/client',
+          INSPECTOR: '/inspector',
+          REALTOR: '/realtor',
+          ADMIN: '/admin',
+        };
+        const destination = roleDashboardMap[result.role ?? ''] ?? '/client';
+        router.push(destination);
         router.refresh();
       }
     } catch {

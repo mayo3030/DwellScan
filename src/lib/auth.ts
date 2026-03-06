@@ -75,9 +75,13 @@ export async function createSession(
   });
 
   const cookieStore = await cookies();
+  // Allow cookie over HTTP in sandbox/dev environments
+  const isSecure = process.env.NODE_ENV === 'production' &&
+    process.env.NEXT_PUBLIC_APP_URL?.startsWith('https');
+
   cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isSecure,
     sameSite: 'lax',
     expires: expiresAt,
     path: '/',

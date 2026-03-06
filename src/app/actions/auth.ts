@@ -12,6 +12,7 @@ const SALT_ROUNDS = 12;
 export type AuthActionResult = {
   success: boolean;
   error?: string;
+  role?: string;
 };
 
 /**
@@ -118,7 +119,7 @@ export async function loginUser(input: LoginInput): Promise<AuthActionResult> {
       entityId: user.id,
     });
 
-    return { success: true };
+    return { success: true, role: user.role };
   } catch (error) {
     console.error('Login error:', error);
     return { success: false, error: 'Login failed. Please try again.' };
