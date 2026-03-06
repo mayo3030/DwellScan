@@ -41,3 +41,6 @@ next-env.d.ts
 .idea/
 .vscode/
 server.log
+.next/
+dev.log
+prod.log
