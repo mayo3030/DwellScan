@@ -1,0 +1,700 @@
+// DwellScan - Real Estate Inspection Marketplace
+// Prisma Schema - PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  CLIENT
+  INSPECTOR
+  REALTOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  PENDING_VERIFICATION
+}
+
+enum InspectorVerificationStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum BookingStatus {
+  DRAFT
+  PENDING_INSPECTOR
+  NEGOTIATING
+  ACCEPTED
+  PAYMENT_PENDING
+  PAYMENT_AUTHORIZED
+  SCHEDULED
+  IN_PROGRESS
+  INSPECTION_COMPLETE
+  REPORT_UPLOADED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum ServiceType {
+  AI_SCAN
+  FULL_INSPECTION
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED
+  CANCELLED
+}
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  ON_HOLD
+}
+
+enum AIScanStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+  REVIEWED
+}
+
+enum MessageType {
+  TEXT
+  PRICE_OFFER
+  PRICE_ACCEPTED
+  PRICE_REJECTED
+  ADDON_REQUEST
+  SYSTEM
+  AI_SUGGESTION
+}
+
+enum DocumentType {
+  LICENSE
+  INSURANCE
+  CERTIFICATION
+  INSPECTION_REPORT
+  AI_SCAN_MEDIA
+  AVATAR
+  OTHER
+}
+
+enum NotificationType {
+  BOOKING_CREATED
+  BOOKING_ACCEPTED
+  BOOKING_REJECTED
+  BOOKING_CANCELLED
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
+  PAYOUT_COMPLETED
+  REPORT_UPLOADED
+  REVIEW_RECEIVED
+  VERIFICATION_UPDATE
+  MESSAGE_RECEIVED
+  SYSTEM
+  PRICE_OFFER
+  DISPUTE_OPENED
+  DISPUTE_RESOLVED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_CLIENT
+  RESOLVED_INSPECTOR
+  CLOSED
+}
+
+enum CommissionTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+}
+
+// ============================================
+// USER & AUTH
+// ============================================
+
+model User {
+  id             String     @id @default(cuid())
+  email          String     @unique
+  passwordHash   String
+  firstName      String
+  lastName       String
+  phone          String?
+  avatarUrl      String?
+  role           UserRole
+  status         UserStatus @default(ACTIVE)
+  emailVerified  Boolean    @default(false)
+  lastLoginAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Role-specific profiles
+  clientProfile    ClientProfile?
+  inspectorProfile InspectorProfile?
+  realtorProfile   RealtorProfile?
+  adminProfile     AdminProfile?
+
+  // Relations
+  sentMessages     Message[]      @relation("SentMessages")
+  notifications    Notification[]
+  auditLogs        AuditLog[]     @relation("AuditActor")
+  documents        UploadedDocument[]
+  sessions         Session[]
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+}
+
+// ============================================
+// ROLE PROFILES
+// ============================================
+
+model ClientProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addresses Address[]
+  bookings  Booking[] @relation("ClientBookings")
+  aiScans   AIScan[]
+  reviews   Review[]  @relation("ClientReviews")
+
+  referredByRealtorId String?
+  referredByRealtor   RealtorProfile? @relation("ReferredClients", fields: [referredByRealtorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model InspectorProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  // Professional details
+  businessName     String?
+  licenseNumber    String?
+  yearsExperience  Int       @default(0)
+  bio              String?
+  specializations  String[]  @default([])
+
+  // Verification
+  verificationStatus InspectorVerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  verificationNotes  String?
+
+  // Service area
+  serviceAreaCities  String[]  @default([])
+  serviceAreaZips    String[]  @default([])
+  serviceRadiusMiles Int       @default(25)
+  baseLat            Float?
+  baseLng            Float?
+
+  // Pricing in cents
+  basePriceCents      Int @default(35000)
+  radonPriceCents     Int @default(15000)
+  moldPriceCents      Int @default(12000)
+  termitePriceCents   Int @default(10000)
+  sewerPriceCents     Int @default(25000)
+  leadPriceCents      Int @default(8000)
+  oilTankPriceCents   Int @default(20000)
+
+  // Availability
+  availableMonday    Boolean @default(true)
+  availableTuesday   Boolean @default(true)
+  availableWednesday Boolean @default(true)
+  availableThursday  Boolean @default(true)
+  availableFriday    Boolean @default(true)
+  availableSaturday  Boolean @default(false)
+  availableSunday    Boolean @default(false)
+  startTime          String  @default("08:00")
+  endTime            String  @default("17:00")
+
+  // Stripe Connect
+  stripeAccountId     String?  @unique
+  stripeOnboarded     Boolean  @default(false)
+  stripePayoutsEnabled Boolean @default(false)
+
+  // Ratings
+  averageRating Float @default(0)
+  totalReviews  Int   @default(0)
+
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings           Booking[]              @relation("InspectorBookings")
+  reviews            Review[]               @relation("InspectorReviews")
+  availExceptions    AvailabilityException[]
+  payouts            Payout[]
+  verificationDocs   UploadedDocument[]     @relation("InspectorDocs")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([verificationStatus])
+  @@index([baseLat, baseLng])
+}
+
+model RealtorProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  agencyName      String?
+  licenseNumber   String?
+  commissionTier  CommissionTier @default(BRONZE)
+
+  // Commission rate in basis points (e.g., 500 = 5%)
+  commissionRateBps Int @default(500)
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referredClients ClientProfile[]   @relation("ReferredClients")
+  commissionLogs  CommissionLog[]
+  bookings        Booking[]         @relation("RealtorBookings")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AdminProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  isSuperAdmin Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// ADDRESS
+// ============================================
+
+model Address {
+  id              String @id @default(cuid())
+  clientProfileId String
+
+  street    String
+  unit      String?
+  city      String
+  state     String
+  zip       String
+  country   String  @default("US")
+  lat       Float?
+  lng       Float?
+
+  label     String? // e.g., "Home", "Investment Property"
+
+  clientProfile ClientProfile @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
+  bookings      Booking[]
+  aiScans       AIScan[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([zip])
+  @@index([city, state])
+}
+
+// ============================================
+// BOOKING & FINANCIALS
+// ============================================
+
+model Booking {
+  id String @id @default(cuid())
+
+  clientProfileId    String
+  inspectorProfileId String
+  realtorProfileId   String?
+  addressId          String
+
+  serviceType   ServiceType
+  status        BookingStatus @default(DRAFT)
+
+  // Scheduled time
+  scheduledDate DateTime?
+  scheduledTime String?
+  checkedInAt   DateTime?
+  completedAt   DateTime?
+
+  // Immutable pricing snapshot (all in cents)
+  basePriceCents       Int
+  addonsTotalCents     Int      @default(0)
+  subtotalCents        Int
+  platformFeeCents     Int
+  inspectorPayoutCents Int
+  realtorCommCents     Int      @default(0)
+  finalTotalCents      Int
+  negotiatedPriceCents Int?
+
+  // Status flags
+  priceLocked      Boolean @default(false)
+  reportUploaded   Boolean @default(false)
+  reviewRequested  Boolean @default(false)
+
+  // Notes
+  clientNotes    String?
+  inspectorNotes String?
+  cancelReason   String?
+
+  // Relations
+  clientProfile    ClientProfile    @relation("ClientBookings", fields: [clientProfileId], references: [id])
+  inspectorProfile InspectorProfile @relation("InspectorBookings", fields: [inspectorProfileId], references: [id])
+  realtorProfile   RealtorProfile?  @relation("RealtorBookings", fields: [realtorProfileId], references: [id])
+  address          Address          @relation(fields: [addressId], references: [id])
+
+  addons          BookingAddon[]
+  messages        Message[]
+  payment         PaymentRecord?
+  payout          Payout?
+  dispute         Dispute?
+  report          InspectionReport?
+  commissionLog   CommissionLog?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientProfileId])
+  @@index([inspectorProfileId])
+  @@index([status])
+  @@index([scheduledDate])
+  @@index([createdAt])
+}
+
+model BookingAddon {
+  id        String @id @default(cuid())
+  bookingId String
+  name      String // radon, mold, termite, sewer, lead, oil_tank
+  priceCents Int
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, name])
+}
+
+model PaymentRecord {
+  id        String @id @default(cuid())
+  bookingId String @unique
+
+  stripePaymentIntentId String?  @unique
+  stripeChargeId        String?
+  stripeTransferId      String?
+  stripeRefundId        String?
+
+  amountCents    Int
+  status         PaymentStatus @default(PENDING)
+  paidAt         DateTime?
+  refundedAt     DateTime?
+  failureMessage String?
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([stripePaymentIntentId])
+  @@index([status])
+}
+
+model Payout {
+  id                 String @id @default(cuid())
+  inspectorProfileId String
+  bookingId          String @unique
+
+  amountCents    Int
+  status         PayoutStatus @default(PENDING)
+  stripeTransferId String?
+  stripePayoutId   String?
+  processedAt    DateTime?
+  failureMessage String?
+  adminNotes     String?
+
+  inspectorProfile InspectorProfile @relation(fields: [inspectorProfileId], references: [id])
+  booking          Booking          @relation(fields: [bookingId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([inspectorProfileId])
+  @@index([status])
+}
+
+model CommissionLog {
+  id               String @id @default(cuid())
+  realtorProfileId String
+  bookingId        String @unique
+
+  amountCents   Int
+  rateBps       Int
+  tier          CommissionTier
+  paidOut       Boolean   @default(false)
+  paidOutAt     DateTime?
+
+  realtorProfile RealtorProfile @relation(fields: [realtorProfileId], references: [id])
+  booking        Booking        @relation(fields: [bookingId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([realtorProfileId])
+}
+
+// ============================================
+// AI SCAN
+// ============================================
+
+model AIScan {
+  id              String @id @default(cuid())
+  clientProfileId String
+  addressId       String
+
+  status          AIScanStatus @default(PROCESSING)
+  mediaUrls       String[]     @default([])
+  videoUrl        String?
+
+  // AI results placeholder
+  resultJson      Json?
+  confidenceScore Float?
+  summary         String?
+  reviewed        Boolean @default(false)
+  reviewedBy      String?
+  reviewedAt      DateTime?
+
+  // Pricing
+  priceCents         Int
+  stripePaymentIntentId String?
+
+  clientProfile ClientProfile @relation(fields: [clientProfileId], references: [id])
+  address       Address       @relation(fields: [addressId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientProfileId])
+  @@index([status])
+}
+
+// ============================================
+// CHAT / MESSAGING
+// ============================================
+
+model Message {
+  id        String @id @default(cuid())
+  bookingId String
+  senderId  String
+
+  type      MessageType @default(TEXT)
+  content   String
+  metadata  Json?       // For price offers: { offeredPriceCents, addons, note }
+
+  readAt    DateTime?
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  sender  User    @relation("SentMessages", fields: [senderId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+// ============================================
+// REVIEWS
+// ============================================
+
+model Review {
+  id                 String @id @default(cuid())
+  clientProfileId    String
+  inspectorProfileId String
+  bookingId          String @unique
+
+  rating      Int    // 1-5
+  title       String?
+  comment     String?
+  response    String? // Inspector's response
+
+  clientProfile    ClientProfile    @relation("ClientReviews", fields: [clientProfileId], references: [id])
+  inspectorProfile InspectorProfile @relation("InspectorReviews", fields: [inspectorProfileId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([inspectorProfileId])
+}
+
+// ============================================
+// INSPECTION REPORT
+// ============================================
+
+model InspectionReport {
+  id        String @id @default(cuid())
+  bookingId String @unique
+
+  fileUrl      String
+  fileName     String
+  fileSizeBytes Int?
+  summary      String?
+  uploadedAt   DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+}
+
+// ============================================
+// DISPUTES
+// ============================================
+
+model Dispute {
+  id        String @id @default(cuid())
+  bookingId String @unique
+
+  reason      String
+  description String?
+  status      DisputeStatus @default(OPEN)
+  resolution  String?
+  resolvedBy  String?
+  resolvedAt  DateTime?
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// ============================================
+// AVAILABILITY
+// ============================================
+
+model AvailabilityException {
+  id                 String @id @default(cuid())
+  inspectorProfileId String
+
+  date        DateTime
+  isBlocked   Boolean  @default(true) // true = blocked, false = custom hours
+  startTime   String?  // Only for custom hours
+  endTime     String?
+  reason      String?
+
+  inspectorProfile InspectorProfile @relation(fields: [inspectorProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([inspectorProfileId, date])
+  @@index([date])
+}
+
+// ============================================
+// UPLOADED DOCUMENTS
+// ============================================
+
+model UploadedDocument {
+  id     String @id @default(cuid())
+  userId String
+
+  inspectorProfileId String?
+
+  type         DocumentType
+  fileName     String
+  fileUrl      String
+  fileSizeBytes Int?
+  mimeType     String?
+  verified     Boolean  @default(false)
+  verifiedAt   DateTime?
+  verifiedBy   String?
+
+  user             User              @relation(fields: [userId], references: [id])
+  inspectorProfile InspectorProfile? @relation("InspectorDocs", fields: [inspectorProfileId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([inspectorProfileId])
+  @@index([type])
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+
+  type      NotificationType
+  title     String
+  message   String
+  link      String?
+  readAt    DateTime?
+  metadata  Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([readAt])
+  @@index([createdAt])
+}
+
+// ============================================
+// AUDIT LOG
+// ============================================
+
+model AuditLog {
+  id      String @id @default(cuid())
+  actorId String?
+
+  action      String
+  entityType  String
+  entityId    String?
+  details     Json?
+  ipAddress   String?
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType])
+  @@index([createdAt])
+  @@index([action])
+}
